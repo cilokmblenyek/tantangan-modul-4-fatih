@@ -1,145 +1,108 @@
-#define FUSE_USE_VERSION 28
+#define FUSE_USE_VERSION 30
 #include <fuse.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <dirent.h>
 #include <errno.h>
-#include <sys/time.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/types.h>
+#include <pwd.h>
+#include <dirent.h>  // for DIR and struct dirent
+#include <sys/stat.h> // for struct stat
+#include <stdlib.h>
 
-static  const  char *dirpath = "/home/fatih/Documents/tantangan-modul-4";
+static const char *target_path = "/home/fatih/Documents/tantangan-modul-4";
 
-static  int  xmp_getattr(const char *path, struct stat *stbuf)
-{
+
+static int myfs_getattr(const char *path, struct stat *stbuf) {
     int res;
-    char fpath[1000];
-
-    sprintf(fpath,"%s%s",dirpath,path);
-
-    res = lstat(fpath, stbuf);
-
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
+    res = lstat(full_path, stbuf);
     if (res == -1) return -errno;
-
     return 0;
 }
 
-static int xmp_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi)
-{
-    char fpath[1000];
-
-    if(strcmp(path,"/") == 0)
-    {
-        path=dirpath;
-        sprintf(fpath,"%s",path);
-    } else sprintf(fpath, "%s%s",dirpath,path);
-
-    int res = 0;
-
+static int myfs_readdir(const char *path, void *buf, fuse_fill_dir_t filler, off_t offset, struct fuse_file_info *fi) {
     DIR *dp;
     struct dirent *de;
-    (void) offset;
-    (void) fi;
-
-    dp = opendir(fpath);
-
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
+    dp = opendir(full_path);
     if (dp == NULL) return -errno;
-
     while ((de = readdir(dp)) != NULL) {
         struct stat st;
-
         memset(&st, 0, sizeof(st));
-
         st.st_ino = de->d_ino;
         st.st_mode = de->d_type << 12;
-        res = (filler(buf, de->d_name, &st, 0));
-
-        if(res!=0) break;
+        if (filler(buf, de->d_name, &st, 0)) break;
     }
-
     closedir(dp);
-
-    return res;
+    return 0;
 }
 
-static int xmp_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi)
-{
-    char fpath[1000];
-    if(strcmp(path,"/") == 0)
-    {
-        path=dirpath;
+static int myfs_open(const char *path, struct fuse_file_info *fi) {
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
 
-        sprintf(fpath,"%s",path);
-    }
-    else sprintf(fpath, "%s%s",dirpath,path);
-
-    int res = 0;
-    int fd = 0 ;
-
-    (void) fi;
-
-    fd = open(fpath, O_RDONLY);
-
+    int fd = open(full_path, fi->flags);
     if (fd == -1) return -errno;
 
-    res = pread(fd, buf, size, offset);
-
-    if (res == -1) res = -errno;
-
-    close(fd);
-
-
-    return res;
+    fi->fh = fd;
+    return 0;
 }
 
-static void *xmp_init(struct fuse_conn_info *conn) {
-    int res;
-    char fpath[1000];
-    sprintf(fpath, "%s/hello.txt", dirpath);
 
-    int fd = open(fpath, O_CREAT | O_WRONLY, 0666);
-    if (fd == -1) {
-        fprintf(stderr, "Error creating file: %s\n", strerror(errno));
-        return NULL; 
-    }
-    res = write(fd, "Hello, World!", strlen("Hello, World!"));
-    if (res == -1) {
-        fprintf(stderr, "Error writing file: %s\n", strerror(errno));
-        return NULL; 
-    }
-    close(fd);
-
-    return NULL;
-}
-
-static int xmp_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
-    char fpath[1000];
-    sprintf(fpath, "%s%s", dirpath, path);
-
-    int fd = open(fpath, O_WRONLY);
+static int myfs_create(const char *path, mode_t mode, struct fuse_file_info *fi) {
+    char full_path[1024];
+    snprintf(full_path, sizeof(full_path), "%s%s", target_path, path);
+    int fd = open(full_path, O_CREAT | O_WRONLY | O_TRUNC, mode);
     if (fd == -1) {
         return -errno;
     }
 
-    int res = pwrite(fd, buf, size, offset);
-    if (res == -1) {
-        res = -errno;
-    }
+    fi->fh = fd;
+    return 0;
+}
 
-    close(fd);
+static int myfs_write(const char *path, const char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    int res;
+    // Write directly
+    res = pwrite(fd, buf, size, offset);
+    if (res == -1) res = -errno;
     return res;
 }
 
-static struct fuse_operations xmp_oper = {
-    .getattr = xmp_getattr,
-    .readdir = xmp_readdir,
-    .read = xmp_read,
-    .init = xmp_init,
-    .write = xmp_write,
+static int myfs_read(const char *path, char *buf, size_t size, off_t offset, struct fuse_file_info *fi) {
+    int fd = fi->fh;
+    int res;
+    res = pread(fd, buf, size, offset);
+    if (res == -1) res = -errno;
+    return res;
+}
+
+// Function to write world.txt
+void writeImageCountsToFile() {
+    FILE* file = fopen("/home/fatih/Documents/tantangan-modul-4/hello.txt", "w");
+
+    // Write the total number of images downloaded to the file
+    fprintf(file, "Hello, World!\n");
+
+    fclose(file);
+}
+
+
+static struct fuse_operations myfs_oper = {
+    .getattr = myfs_getattr,
+    .readdir = myfs_readdir,
+    .open = myfs_open,
+    .read = myfs_read,
+    .write = myfs_write,
+    .create = myfs_create,
 };
 
-int  main(int  argc, char *argv[])
-{
-    umask(0);
-    return fuse_main(argc, argv, &xmp_oper, NULL);
+int main(int argc, char *argv[]) {
+    writeImageCountsToFile();
+    return fuse_main(argc, argv, &myfs_oper, NULL);
 }

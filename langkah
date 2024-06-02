@@ -1,0 +1,7 @@
+gcc -Wall 1.c -o output1 `pkg-config fuse --cflags --libs`
+./output1 mnt/ -o allow_other
+sudo umount -f mnt
+
+gcc -Wall 2.c -o output2 `pkg-config fuse --cflags --libs`
+./output2 mnt/ -o allow_other
+sudo umount -f mnt
